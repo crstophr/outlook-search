@@ -21,16 +21,22 @@ async function bridgeRequest(path, options = {}) {
         },
     };
     
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     try {
-        const response = await fetch(url, { ...defaults, ...options });
-        
+        const response = await fetch(url, { ...defaults, ...options, signal: controller.signal });
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Bridge returned ${response.status}: ${errorText}`);
         }
-        
+
         return await response.json();
     } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('Outlook bridge request timed out after 10 seconds');
+        }
         if (error.code === 'ECONNREFUSED') {
             throw new Error(
                 'Cannot connect to Outlook bridge server. Make sure outlook-bridge.py is running on Windows:\n' +
@@ -38,6 +44,8 @@ async function bridgeRequest(path, options = {}) {
             );
         }
         throw error;
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
@@ -52,17 +60,26 @@ async function healthCheck() {
  * Search for emails
  */
 async function searchEmails(query = '', options = {}) {
-    const { 
-        folder = 'inbox', 
-        limit = 100, 
+    const {
+        folder = 'inbox',
+        limit = 100,
         unreadOnly = false,
         days = null,
-        includeFullBody = false 
+        startDate = null,
+        endDate = null,
+        includeFullBody = false
     } = options;
-    
+
     return bridgeRequest('/api/email/search', {
         method: 'POST',
-        body: JSON.stringify({ query, folder, limit, unread_only: unreadOnly, days, include_full_body: includeFullBody }),
+        body: JSON.stringify({
+            query, folder, limit,
+            unread_only: unreadOnly,
+            days,
+            start_date: startDate ? startDate.toISOString().split('T')[0] : null,
+            end_date: endDate ? endDate.toISOString().split('T')[0] : null,
+            include_full_body: includeFullBody
+        }),
     });
 }
 

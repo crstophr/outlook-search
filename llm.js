@@ -79,11 +79,6 @@ const DEFAULT_FALLBACK_CONFIG = {
     model: 'Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.Q4_K_M.gguf'
 };
 
-/**
- * Cache for current config (reloaded on each major operation)
- */
-let cachedConfig = null;
-let configLastLoaded = 0;
 
 /**
  * Analyze a batch of email summaries and score them for relevance
@@ -204,7 +199,7 @@ Do not include any text outside the JSON array.
  * Call the LLM with a prompt
  */
 async function callLlm(prompt, options = {}) {
-    const { system, config = DEFAULT_CONFIG } = options;
+    const { system, config = DEFAULT_FALLBACK_CONFIG } = options;
     
     const messages = [];
     
@@ -214,20 +209,29 @@ async function callLlm(prompt, options = {}) {
     
     messages.push({ role: 'user', content: prompt });
     
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`
-        },
-        body: JSON.stringify({
-            model: config.model,
-            messages: messages,
-            temperature: 0.3,  // Low temperature for consistent analysis
-            max_tokens: 4096
-        })
-    });
-    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+
+    let response;
+    try {
+        response = await fetch(`${config.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.apiKey}`
+            },
+            body: JSON.stringify({
+                model: config.model,
+                messages: messages,
+                temperature: 0.3,  // Low temperature for consistent analysis
+                max_tokens: 4096
+            }),
+            signal: controller.signal
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`LLM API error: ${response.status} - ${errorText}`);

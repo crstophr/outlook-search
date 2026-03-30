@@ -44,8 +44,14 @@ function parseMonth(monthName) {
         return null;
     }
     
-    const year = new Date().getFullYear();
-    
+    const now = new Date();
+    let year = now.getFullYear();
+
+    // If the month hasn't happened yet this year, use last year
+    if (monthIndex > now.getMonth()) {
+        year -= 1;
+    }
+
     // Start of the month
     const startDate = new Date(year, monthIndex, 1);
     // End of the month

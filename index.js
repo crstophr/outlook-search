@@ -207,7 +207,7 @@ class OutlookSearchSession {
  */
 async function main() {
     // Check if run from OpenClaw or standalone CLI
-    if (process.argv.includes('--cli') || process.argv.length > 1) {
+    if (process.argv.includes('--cli') || process.argv.length > 2) {
         // Interactive CLI mode
         const session = new OutlookSearchSession();
         await session.start();

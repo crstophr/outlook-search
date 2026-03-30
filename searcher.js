@@ -11,15 +11,6 @@ const { analyzeEmailRelevance, extractRelevantSnippets } = require('./llm');
 const { searchEmails, getEmailById, healthCheck, extractLinks: bridgeExtractLinks, createEmailLink } = require('./bridge-client');
 
 /**
- * Create an Outlook deep link from email EntryID
- * This allows direct opening in Outlook desktop app
- */
-function createOutlookLink(entryId) {
-    const cleanId = encodeURIComponent(entryId);
-    return `outlook://#email/${cleanId}`;
-}
-
-/**
  * Verify bridge is available
  */
 async function verifyBridge() {
@@ -53,14 +44,28 @@ async function broadSearch(query, options = {}) {
             daysParam = daysAgo;
         }
         
+        const startDate = dateRange?.range?.startDate || null;
+        const endDate = dateRange?.range?.endDate || null;
+
         const result = await searchEmails(query, {
             limit,
             unreadOnly: false,
             days: daysParam,
+            startDate,
+            endDate,
             includeFullBody: false
         });
-        
-        const emails = result.emails || [];
+
+        let emails = result.emails || [];
+
+        // Client-side filter by end date (bridge may not support it)
+        if (endDate) {
+            emails = emails.filter(email => {
+                const emailDate = email.received_datetime ? new Date(email.received_datetime) : null;
+                return !emailDate || emailDate <= endDate;
+            });
+        }
+
         console.log(`  Found ${emails.length} emails`);
         return emails;
     } catch (error) {
@@ -256,6 +261,5 @@ module.exports = {
     analyzeEmailSummaries,
     formatEmailForDisplay,
     formatEmailResult,
-    createOutlookLink,
     verifyBridge
 };

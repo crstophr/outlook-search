@@ -60,7 +60,7 @@ function buildSearchQuery(query, options = {}) {
     }
     
     // Build query with OR between synonyms
-    const termQuery = terms.map(t => `"${t.replace(/"/g, '\\')}"`).join(" OR ");
+    const termQuery = terms.map(t => `"${t.replace(/"/g, '\\"')}"`).join(" OR ");
     
     return termQuery;
 }
