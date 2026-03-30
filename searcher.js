@@ -7,6 +7,7 @@
 
 const { expandSearchIntent } = require('./query-expander');
 const { parseDate } = require('./date-parser');
+const { analyzeEmailRelevance, extractRelevantSnippets } = require('./llm');
 
 /**
  * Initialize the MAPI client
@@ -69,71 +70,12 @@ async function analyzeEmailSummaries(emails, searchContext) {
     
     console.log(`\n🧠 Analyzing ${emails.length} emails with LLM...`);
     
-    // Build context for the LLM
-    const emailText = emails.map((email, idx) => `
-Email #${idx + 1}:
-- Subject: ${email.subject || '(no subject)'}
-- From: ${email.senderName || ''} <${email.senderEmail || ''}>
-- Date: ${email.receivedDateTime ? new Date(email.receivedDateTime).toLocaleString() : 'unknown'}
-- Has attachments: ${email.hasAttachments}
-`).join('\n');
+    // Use the LLM module for intelligent analysis
+    const result = await analyzeEmailRelevance(emails, searchContext);
     
-    const prompt = `
-You are analyzing email search results. The user is looking for: ${searchContext.query}
-
-Additional context provided: ${searchContext.context || 'None'}
-
-Here are the search results (subject, sender, date only):
-
-${emailText}
-
-TASK: Score each email from 1-10 based on how likely it contains what the user is looking for.
-
-For each email, provide:
-1. RELEVANCE_SCORE (1-10)
-2. BRIEF_REASONE (why this score)
-3. HAS_DOCUMENTS (yes/no/maybe - does it seem to mention attachments or documents?)
-
-Format your response as JSON array like this:
-[
-  {"index": 1, "score": 8, "reasoning": "...", "hasDocuments": "maybe"},
-  ...
-]
-`;
+    console.log(`  Found ${result.filtered.length} relevant emails (score >= 4)`);
     
-    try {
-        // TODO: Call LLM here - for now, return placeholder
-        const analysis = await callLlm(prompt);
-        
-        const scored = emails.map((email, idx) => ({
-            ...email,
-            relevanceScore: analysis[idx]?.score || 5,
-            reasoning: analysis[idx]?.reasoning || '',
-            hasDocuments: analysis[idx]?.hasDocuments || 'unknown'
-        }));
-        
-        const filtered = scored
-            .filter(e => e.relevanceScore >= 5)
-            .sort((a, b) => b.relevanceScore - a.relevanceScore);
-        
-        return { scored, filtered };
-    } catch (error) {
-        console.error('LLM analysis failed:', error.message);
-        return { 
-            scored: emails.map(e => ({ ...e, relevanceScore: 5 })),
-            filtered: emails.slice(0, 10)
-        };
-    }
-}
-
-/**
- * Call the LLM for analysis
- */
-async function callLlm(prompt) {
-    // This would integrate with OpenClaw's LLM provider
-    // For now, return a simple mock response
-    console.log('  (LLM call would happen here)');
-    return [];
+    return result;
 }
 
 /**
@@ -197,11 +139,8 @@ function extractLinks(text) {
     // Match http/https URLs
     const httpUrls = text.match(/https?:\/\/[^\s<"')]+[\w\/]/g) || [];
     
-    // Match SharePoint/OneDrive style paths
-    const sharepointUrls = text.match(/[^:\s]+\.[^\s]+\/[^\s<"')]+\/[^\s<"')]+/g) || [];
-    
     // Deduplicate and return
-    return [...new Set([...httpUrls, ...sharepointUrls])].slice(0, 10);
+    return [...new Set(httpUrls)].slice(0, 10);
 }
 
 /**
