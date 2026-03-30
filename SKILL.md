@@ -1,105 +1,138 @@
 ---
 name: outlook-search
-description: Search through Outlook inbox, calendar, and other data. Use when users want to find specific emails by keywords, sender, date range, or search for calendar events. Wraps the outlook-mapi skill to provide unified search capabilities across Outlook data.
+description: Interactive natural language search through Outlook inbox, calendar, and attachments. Use when users want to find specific emails or documents using conversational queries rather than precise keywords. Supports iterative refinement and LLM-powered relevance scoring.
 ---
 
 # Outlook Search Skill
 
-A powerful search interface for finding emails and calendar events in Microsoft Outlook.
+An intelligent, conversational interface for finding emails and documents in Microsoft Outlook. Instead of wrestling with keyword searches, describe what you're looking for in natural language.
 
 ## What It Does
 
-This skill provides a unified search experience across Outlook data:
+This skill provides **LLM-powered search** that understands vague queries like:
 
-### Email Search Capabilities
-- **By keyword** — search subject, body, and sender
-- **By sender** — find all emails from/to specific people
-- **By date range** — limit results to specific time periods
-- **By status** — unread only, importance filters
-- **By folder** — inbox, sent items, drafts, custom folders
-- **Combined queries** — mix multiple criteria together
+> "I'm looking for the Visa statement of work document - I think it was emailed to me around February"
 
-### Calendar Search Capabilities
-- **By keyword** — search event subjects and locations
-- **By attendee** — find events with specific people
-- **By date range** — search within specific timeframes
-- **By type** — meetings vs appointments
+And intelligently:
+1. Expands search terms ("statement of work" → also searches "SOW", "scope of work")
+2. Applies date buffers ("February" → mid-January through mid-March)
+3. Reads email bodies for context, not just subjects
+4. Scores results by relevance using an LLM
+5. Extracts links and attachment filenames
+6. Supports iterative refinement in conversation
 
 ## Usage Examples
 
-### Email Searches
+### Basic Search
 
 ```bash
-# Find emails by keyword
-outlook-search --type email --query "project alpha"
+# From CLI (interactive mode)
+node index.js --cli
 
-# Find unread emails from a sender
-outlook-search --type email --query "from:john.doe" --unread-only
-
-# Search with date filter (last 7 days)
-outlook-search --type email --query "budget" --days 7
-
-# Find high importance emails
-outlook-search --type email --importance high --limit 20
+# Or programmatically from OpenClaw:
+const { searchOutlook } = require('./skills/outlook-search');
+const results = await searchOutlook({
+    query: "Visa statement of work",
+    context: "looking for signed document or link to it",
+    dateHint: "February"
+});
 ```
 
-### Calendar Searches
+### What You Can Ask
 
-```bash
-# Search calendar events by keyword
-outlook-search --type calendar --query "meeting" --days 30
+**Documents:**
+- "Find the Visa project statement of work"
+- "Where's that invoice from Acme Corp?"
+- "Search for the NDA I signed last month"
 
-# Find events with specific attendee (requires full implementation)
-outlook-search --type calendar --query "john.doe"
-```
+**With Context:**
+- "Email about the quarterly budget review"  
+- "Something from Sarah about the migration timeline"
+- "The document with the system requirements - think it had a SharePoint link"
 
-### Combined/Advanced
+**Date-Based:**
+- "That proposal email from last week"
+- "Anything about the contract signed in March"
+- "Recent emails with attachments from the finance team"
 
-```bash
-# Search both emails and calendar
-outlook-search --type all --query "quarterly review" --days 60
+## Interactive Mode Features
 
-# Limit results
-outlook-search --type email --query "invoice" --limit 5
-```
+When you run `node index.js --cli`, you enter an interactive session:
+
+1. **Describe what you're looking for**
+   
+   *"Find that Visa statement of work document"*
+
+2. **Answer clarifying questions (optional)**
+   
+   - "Do you remember approximately when this was?"
+   - "Any other details? (sender name, keywords, project names)"
+
+3. **Review results** - sorted by relevance score
+
+4. **Refine if needed:**
+   - Add more keywords/context
+   - Adjust date range
+   - Start over with new query
 
 ## Architecture
 
-This skill imports from **outlook-mapi** for data access:
-
 ```
 outlook-search (this skill)
-    ↓ imports from ↓
-outlook-mapi (general-purpose Outlook API client)
-    ↓ fetches via HTTP ↓
-outlook-bridge.py (Python Flask → MAPI COM)
-    ↓ uses MAPI ↓
+    ├── index.js          → Main entry point + interactive CLI
+    ├── searcher.js       → Multi-phase search orchestration
+    ├── query-expander.js → Natural language → search queries
+    └── date-parser.js    → "February" → date range with buffer
+            ↓
+outlook-mapi (Outlook API client)
+            ↓
+Outlook Bridge (Python/MAPI)
+            ↓
 Windows Outlook Desktop App
 ```
 
-## CLI Interface
+### Search Phases
 
-### Command Format
+**Phase 1: Broad Scan**
+- Expands query into multiple variants
+- Searches with relaxed criteria
+- Returns subjects, senders, dates only
 
-```bash
-outlook-search [options]
+**Phase 2: LLM Filtering**
+- Analyzes summaries for relevance
+- Scores each email (1-10)
+- Filters to top candidates
+
+**Phase 3: Deep Read**
+- Fetches full email bodies
+- Extracts links and attachment names
+- Presents detailed results
+
+## Output Format
+
+Each result includes:
+- **Subject, Sender, Date**
+- **Relevance Score** (1-10)
+- **Attachment filenames** (if any)
+- **Extracted links** (SharePoint, OneDrive, etc.)
+- **Body preview** (first 200 characters)
+
+Example:
+```
+1. [Score: 9]
+FROM: John Smith <john.smith@client.com>
+DATE: Feb 15, 2026, 2:34 PM
+SUBJECT: Re: Visa Project - Statement of Work (attached: SOW_Visa_Project_v2.pdf)
+  Preview: Here's the updated statement of work as discussed. Please review and let me know if you have any questions...
+  Links: https://sharepoint.example.com/sites/visa-project/Documents/SOW.docx
 ```
 
-### Options
+## Configuration
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--type` | `email` | What to search: `email`, `calendar`, or `all` |
-| `--query` | `""` | Search query string |
-| `--folder` | `inbox` | Email folder (only for --type email) |
-| `--unread-only` | `false` | Show only unread emails |
-| `--importance` | none | Filter by: `high`, `normal`, `low` |
-| `--days` | none | Limit to last N days |
-| `--limit` | 10 | Max results to return |
-| `--format` | `pretty` | Output format: `pretty`, `json`, `minimal` |
+No special configuration needed - inherits Outlook connection settings from outlook-mapi.
 
-## Implementation Notes
+## Limitations
 
-- Requires Windows with Outlook Desktop app installed
-- Depends on outlook-mapi skill being available
-- Bridge server runs at http://localhost:5000 by default
+- Requires Windows with Outlook Desktop app
+- LLM analysis adds latency (typically 2-5 seconds per phase)
+- Deep reading limited to top 5 results by default (configurable)

@@ -1,267 +1,233 @@
-const readline = require('readline');
-
 /**
- * Outlook Search Skill
+ * Outlook Search - Main Entry Point
  * 
- * A CLI tool for searching emails and calendar events in Microsoft Outlook.
- * Wraps the outlook-mapi skill to provide unified search capabilities.
+ * Interactive CLI for natural language email and document search.
  */
 
-// Import outlook-mapi functions
-async function initOutlookMapi() {
-    try {
-        const mapiModule = require('outlook-mapi');
-        return new mapiModule.OutlookMapi();
-    } catch (error) {
-        console.error('Error initializing Outlook MAPI:', error.message);
-        process.exit(1);
-    }
-}
+const readline = require('readline');
+const { searchOutlook, formatEmailForDisplay } = require('./searcher');
 
 /**
- * Search emails in a specific folder
+ * Interactive session manager
  */
-async function searchEmails(mapi, query, options = {}) {
-    const { folder = 'inbox', limit = 10, unreadOnly = false, importance = null } = options;
+class OutlookSearchSession {
+    constructor() {
+        this.context = {
+            query: '',
+            additionalContext: '',
+            dateHint: null,
+            previousResults: [],
+            refinementCount: 0
+        };
+        
+        this.rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+    }
     
-    console.log(`\nSearching emails in ${folder}...`);
-    console.log(`Query: ${query || '(all)'}`);
-    
-    try {
-        // Get folder ID
-        const folderId = await mapi.getFolderId(folder);
-        if (!folderId) {
-            console.error(`Folder not found: ${folder}`);
-            return [];
+    /**
+     * Start an interactive search session
+     */
+    async start() {
+        console.log('\n' + '='.repeat(70));
+        console.log('  OUTLOOK SEARCH - Interactive Document Finder');
+        console.log('='.repeat(70));
+        console.log('\nI\'ll help you find emails and documents in your Outlook.');
+        console.log('Describe what you\'re looking for in natural language.\n');
+        
+        // Initial query
+        const initialQuery = await this.prompt(
+            "What are you looking for? (e.g., 'Visa statement of work document')"
+        );
+        
+        if (!initialQuery.trim()) {
+            console.log('\nNo query provided. Exiting.');
+            process.exit(0);
         }
         
-        // Build search query
-        let searchQuery = '';
-        if (query) {
-            if (query.startsWith('from:')) {
-                const sender = query.replace('from:', '');
-                searchQuery = `sender:${sender}`;
-            } else if (query.startsWith('to:')) {
-                const recipient = query.replace('to:', '');
-                searchQuery = `recipient:${recipient}`;
-            } else {
-                searchQuery = query;
-            }
-        }
+        this.context.query = initialQuery;
         
-        // Add unread filter if needed
-        if (unreadOnly) {
-            searchQuery = searchQuery ? `${searchQuery} AND isRead:false` : 'isRead:false';
-        }
-        
-        // Add importance filter if needed
-        if (importance) {
-            searchQuery = searchQuery 
-                ? `${searchQuery} AND importance:${importance}` 
-                : `importance:${importance}`;
-        }
+        // Optional clarifying questions
+        await this.askClarifyingQuestions();
         
         // Execute search
-        const results = await mapi.searchMailItems({
-            folderId,
-            query: searchQuery,
-            top: limit,
-            properties: ['subject', 'senderEmail', 'receivedDateTime', 'isRead', 'importance']
+        await this.executeSearch();
+        
+        // Offer refinement
+        await this.offerRefinement();
+    }
+    
+    /**
+     * Ask clarifying questions to narrow the search
+     */
+    async askClarifyingQuestions() {
+        console.log('\n' + '-'.repeat(50));
+        console.log('Let me ask a few questions to narrow this down:\n');
+        
+        // Date hint
+        const dateAnswer = await this.prompt(
+            "Do you remember approximately when this was? (e.g., 'February', 'last week', 'a month ago')"
+        );
+        
+        if (dateAnswer && dateAnswer.trim()) {
+            this.context.dateHint = dateAnswer.trim();
+            console.log(`  → Noted: around ${this.context.dateHint}`);
+        }
+        
+        // Additional context
+        const contextAnswer = await this.prompt(
+            "Any other details? (sender name, keywords, project names, etc.) [press enter to skip]"
+        );
+        
+        if (contextAnswer && contextAnswer.trim()) {
+            this.context.additionalContext = contextAnswer.trim();
+            console.log(`  → Noted: ${this.context.additionalContext}`);
+        }
+        
+        console.log('');
+    }
+    
+    /**
+     * Execute the search with gathered context
+     */
+    async executeSearch() {
+        const searchContext = {
+            query: this.context.query,
+            context: this.context.additionalContext,
+            dateHint: this.context.dateHint
+        };
+        
+        console.log('\n' + '='.repeat(70));
+        console.log('SEARCHING...');
+        console.log('='.repeat(70));
+        console.log(`\nLooking for: "${searchContext.query}"`);
+        if (searchContext.dateHint) {
+            console.log(`Timeframe: ${searchContext.dateHint}`);
+        }
+        if (searchContext.context) {
+            console.log(`Additional context: ${searchContext.context}`);
+        }
+        console.log('');
+        
+        // Perform search
+        const results = await searchOutlook(searchContext, {
+            topN: 10,
+            deepReadLimit: 5
         });
         
-        return results.items || [];
-    } catch (error) {
-        console.error('Error searching emails:', error.message);
-        return [];
+        // Display results
+        this.displayResults(results);
     }
-}
-
-/**
- * Search calendar events
- */
-async function searchCalendar(mapi, query, options = {}) {
-    const { days = null, limit = 10 } = options;
     
-    console.log(`\nSearching calendar...`);
-    console.log(`Query: ${query || '(all)'}`);
+    /**
+     * Display search results
+     */
+    displayResults(results) {
+        console.log('\n' + '='.repeat(70));
+        console.log('RESULTS');
+        console.log('='.repeat(70));
+        
+        if (results.results.length === 0) {
+            console.log('\n❌ No relevant results found.');
+            console.log(results.summary);
+            return;
+        }
+        
+        console.log(`\n${results.summary}\n`);
+        
+        results.results.forEach((result, idx) => {
+            console.log(`${idx + 1}. [Score: ${result.relevanceScore || 'N/A'}]`);
+            console.log(formatEmailForDisplay(result));
+            console.log('-'.repeat(50));
+        });
+    }
     
-    try {
-        // Set date range if specified
-        let startDate, endDate;
-        if (days) {
-            startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-            endDate = new Date().toISOString();
+    /**
+     * Offer to refine the search
+     */
+    async offerRefinement() {
+        const answer = await this.prompt(
+            '\nWant to refine this search? (yes/no)'
+        );
+        
+        if (answer && answer.trim().toLowerCase().startsWith('y')) {
+            await this.refineSearch();
         } else {
-            // Default: today to next 30 days
-            startDate = new Date().toISOString();
-            endDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+            console.log('\nThanks for using Outlook Search!');
+            process.exit(0);
+        }
+    }
+    
+    /**
+     * Refine the current search
+     */
+    async refineSearch() {
+        console.log('\n' + '='.repeat(70));
+        console.log('REFINEMENT');
+        console.log('='.repeat(70));
+        console.log('\nHow would you like to refine?');
+        console.log('  1. Add more keywords/context');
+        console.log('  2. Adjust date range');
+        console.log('  3. Start over with new query');
+        console.log('');
+        
+        const choice = await this.prompt('Choice (1/2/3): ');
+        
+        if (choice === '1') {
+            const additional = await this.prompt('What else should I search for? ');
+            this.context.query += ' ' + additional;
+        } else if (choice === '2') {
+            this.context.dateHint = await this.prompt('New date hint (e.g., "March", "last month"): ');
+        } else if (choice === '3') {
+            this.context.query = await this.prompt('New query: ');
+            this.context.additionalContext = '';
+            this.context.dateHint = null;
         }
         
-        // Build search query for calendar
-        let searchQuery = `
-            start/ge '${startDate}' and start/le '${endDate}'
-        `;
-        
-        if (query) {
-            searchQuery += ` and (${query})`;
-        }
-        
-        const results = await mapi.searchEvents({
-            query: searchQuery,
-            top: limit,
-            properties: ['subject', 'start', 'end', 'location', 'attendees']
+        this.context.refinementCount++;
+        await this.executeSearch();
+        await this.offerRefinement();
+    }
+    
+    /**
+     * Helper for prompting user
+     */
+    prompt(question) {
+        return new Promise(resolve => {
+            this.rl.question(question + ' ', answer => {
+                resolve(answer);
+            });
         });
-        
-        return results.items || [];
-    } catch (error) {
-        console.error('Error searching calendar:', error.message);
-        return [];
     }
-}
-
-/**
- * Format and display search results
- */
-function formatEmail(email) {
-    const subject = email.subject || '(no subject)';
-    const sender = email.senderEmail || '?';
-    const date = email.receivedDateTime 
-        ? new Date(email.receivedDateTime).toLocaleString()
-        : 'unknown';
-    const readStatus = email.isRead ? '' : '[unread]';
-    const importance = email.importance ? ` [${email.importance}]` : '';
-    
-    return `${readStatus}${importance} ${sender}: ${subject} (${date})`;
-}
-
-function formatEvent(event) {
-    const subject = event.subject || '(no subject)';
-    const start = event.start?.dateTime 
-        ? new Date(event.start.dateTime).toLocaleString()
-        : 'unknown';
-    const location = event.location ? ` @ ${event.location}` : '';
-    
-    return `${subject}${location} (${start})`;
-}
-
-/**
- * Parse command line arguments
- */
-function parseArgs(argv) {
-    const args = {
-        type: 'email',
-        query: '',
-        folder: 'inbox',
-        unreadOnly: false,
-        importance: null,
-        days: null,
-        limit: 10,
-        format: 'pretty'
-    };
-    
-    for (let i = 2; i < argv.length; i++) {
-        const arg = argv[i];
-        
-        switch (arg) {
-            case '--type':
-                args.type = argv[++i] || 'email';
-                break;
-            case '--query':
-            case '-q':
-                args.query = argv[++i] || '';
-                break;
-            case '--folder':
-            case '-f':
-                args.folder = argv[++i] || 'inbox';
-                break;
-            case '--unread-only':
-            case '-u':
-                args.unreadOnly = true;
-                break;
-            case '--importance':
-                args.importance = argv[++i];
-                break;
-            case '--days':
-                args.days = parseInt(argv[++i], 10);
-                break;
-            case '--limit':
-            case '-l':
-                args.limit = parseInt(argv[++i], 10);
-                break;
-            case '--format':
-                args.format = argv[++i] || 'pretty';
-                break;
-            default:
-                if (!arg.startsWith('-')) {
-                    args.query = arg;
-                }
-        }
-    }
-    
-    return args;
 }
 
 /**
  * Main entry point
  */
 async function main() {
-    const options = parseArgs(process.argv);
-    
-    console.log('Outlook Search Tool');
-    console.log('==================');
-    console.log();
-    
-    // Initialize MAPI client
-    const mapi = await initOutlookMapi();
-    
-    const allResults = [];
-    
-    // Search emails if requested
-    if (options.type === 'email' || options.type === 'all') {
-        console.log('\n--- EMAIL SEARCH ---');
-        const emails = await searchEmails(mapi, options.query, {
-            folder: options.folder,
-            limit: options.limit,
-            unreadOnly: options.unreadOnly,
-            importance: options.importance
-        });
-        
-        if (options.format === 'json') {
-            allResults.emails = emails;
-        } else {
-            console.log(`\nFound ${emails.length} email(s):\n`);
-            emails.forEach(email => {
-                console.log(formatEmail(email));
-            });
-        }
-    }
-    
-    // Search calendar if requested
-    if (options.type === 'calendar' || options.type === 'all') {
-        console.log('\n--- CALENDAR SEARCH ---');
-        const events = await searchCalendar(mapi, options.query, {
-            days: options.days,
-            limit: options.limit
-        });
-        
-        if (options.format === 'json') {
-            allResults.events = events;
-        } else {
-            console.log(`\nFound ${events.length} event(s):\n`);
-            events.forEach(event => {
-                console.log(formatEvent(event));
-            });
-        }
-    }
-    
-    // Output JSON if requested
-    if (options.format === 'json') {
-        console.log('\n' + JSON.stringify(allResults, null, 2));
+    // Check if run from OpenClaw or standalone CLI
+    if (process.argv.includes('--cli') || process.argv.length > 1) {
+        // Interactive CLI mode
+        const session = new OutlookSearchSession();
+        await session.start();
+    } else {
+        // Called programmatically by OpenClaw
+        console.log('Outlook Search: Ready for programmatic use');
     }
 }
 
-// Run main function
-main().catch(error => {
-    console.error('Fatal error:', error);
-    process.exit(1);
-});
+// Export for programmatic use
+module.exports = {
+    OutlookSearchSession,
+    searchOutlook: require('./searcher').searchOutlook,
+    formatEmailForDisplay
+};
+
+// Run if called directly
+if (require.main === module) {
+    main().catch(error => {
+        console.error('Fatal error:', error);
+        process.exit(1);
+    });
+}
