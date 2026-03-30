@@ -123,6 +123,22 @@ function extractLinks(text) {
     return [...new Set(httpUrls)].slice(0, 10);
 }
 
+/**
+ * Create a clickable deep link to open a specific email in Outlook
+ * 
+ * Uses the Outlook Web App (OWA) deeplink format which:
+ * - Works in any browser
+ * - Often redirects to desktop Outlook app when installed on Windows
+ * - Is compatible across platforms and Outlook versions
+ * 
+ * Note: The native "outlook:" protocol handler is unreliable since Outlook 2013+.
+ */
+function createEmailLink(entryId, subject = '') {
+    // OWA deeplink format
+    const encodedSubject = encodeURIComponent(subject || '(Email)');
+    return `https://outlook.office.com/mail/0/deeplink?subject=${encodedSubject}&itemid=${encodeURIComponent(entryId)}`;
+}
+
 module.exports = {
     bridgeRequest,
     healthCheck,
@@ -131,5 +147,6 @@ module.exports = {
     getEmailById,
     parseOutlookDate,
     extractLinks,
+    createEmailLink,
     BRIDGE_CONFIG
 };

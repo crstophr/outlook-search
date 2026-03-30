@@ -8,7 +8,7 @@
 const { expandSearchIntent } = require('./query-expander');
 const { parseDate } = require('./date-parser');
 const { analyzeEmailRelevance, extractRelevantSnippets } = require('./llm');
-const { searchEmails, getEmailById, healthCheck, extractLinks: bridgeExtractLinks } = require('./bridge-client');
+const { searchEmails, getEmailById, healthCheck, extractLinks: bridgeExtractLinks, createEmailLink } = require('./bridge-client');
 
 /**
  * Create an Outlook deep link from email EntryID
@@ -161,15 +161,15 @@ function formatEmailResult(email) {
         ? ` (${email.attachments_count} attachment(s))`
         : '';
     
-    // Create Outlook deep link
-    const outlookLink = email.id ? createOutlookLink(email.id) : null;
+    // Create clickable OWA deeplink (works in browser, often redirects to desktop)
+    const emailLink = email.id ? createEmailLink(email.id, subject) : null;
     
     return {
         subject,
         sender,
         date,
         attachments,
-        outlookLink,
+        emailLink,
         entryId: email.id,
         relevanceScore: email.relevanceScore,
         reasoning: email.reasoning
