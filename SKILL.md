@@ -1,6 +1,6 @@
 ---
 name: outlook-search
-description: Interactive natural language search through Outlook inbox, calendar, and attachments. Use when users want to find specific emails or documents using conversational queries rather than precise keywords. Supports iterative refinement and LLM-powered relevance scoring.
+description: Intelligent natural language search through Outlook emails with LLM-powered relevance scoring, clickable deep links, and multi-phase analysis.
 ---
 
 # Outlook Search Skill
@@ -14,66 +14,78 @@ This skill provides **LLM-powered search** that understands vague queries like:
 > "I'm looking for the Visa statement of work document - I think it was emailed to me around February"
 
 And intelligently:
-1. Expands search terms ("statement of work" → also searches "SOW", "scope of work")
-2. Applies date buffers ("February" → mid-January through mid-March)
-3. Reads email bodies for context, not just subjects
-4. Scores results by relevance using an LLM
-5. Extracts links and attachment filenames
-6. Supports iterative refinement in conversation
+1. **Expands search terms** ("statement of work" → also searches "SOW", "scope of work")
+2. **Applies date buffers** ("February" → mid-January through mid-March)
+3. **Reads email bodies** for context, not just subjects
+4. **Scores results by relevance** using the configured LLM
+5. **Extracts links** and attachment information
+6. **Provides clickable deep links** that open emails directly in Outlook
 
 ## Usage Examples
 
-### Basic Search
+### Basic Search (CLI)
 
 ```bash
 # From CLI (interactive mode)
+cd skills/outlook-search
 node index.js --cli
+```
 
-# Or programmatically from OpenClaw:
+### Programmatic Use
+
+```javascript
 const { searchOutlook } = require('./skills/outlook-search');
+
 const results = await searchOutlook({
     query: "Visa statement of work",
     context: "looking for signed document or link to it",
     dateHint: "February"
+}, {
+    topN: 10,        // Top N results to return
+    deepReadLimit: 5 // How many emails to fully read
 });
 ```
 
-### What You Can Ask
+### Quick Test Script
 
-**Documents:**
-- "Find the Visa project statement of work"
-- "Where's that invoice from Acme Corp?"
-- "Search for the NDA I signed last month"
+```bash
+node test-visa.js  # Searches for recent Visa-related emails
+```
 
-**With Context:**
-- "Email about the quarterly budget review"  
-- "Something from Sarah about the migration timeline"
-- "The document with the system requirements - think it had a SharePoint link"
+## Features
 
-**Date-Based:**
-- "That proposal email from last week"
-- "Anything about the contract signed in March"
-- "Recent emails with attachments from the finance team"
+### 🔍 Smart Query Expansion
 
-## Interactive Mode Features
+Converts natural language into comprehensive search queries:
+- "statement of work" → searches `"SOW" OR "scope of work" OR "work order"`+
+- "contract" → also searches `"agreement" OR "terms" OR "proposal"`
+- Automatically adds document indicators (`"attachment"`, `"pdf"`, etc.)
 
-When you run `node index.js --cli`, you enter an interactive session:
+### 📅 Natural Language Date Parsing
 
-1. **Describe what you're looking for**
-   
-   *"Find that Visa statement of work document"*
+Understands vague time references:
+- "February" → Jan 15 to Mar 15 (2-week buffer on each side)
+- "last week" → Monday through today
+- "a month ago" → ~30 days back with buffer
+- "recent" or no date → last 90 days
 
-2. **Answer clarifying questions (optional)**
-   
-   - "Do you remember approximately when this was?"
-   - "Any other details? (sender name, keywords, project names)"
+### 🧠 LLM-Powered Relevance Scoring
 
-3. **Review results** - sorted by relevance score
+Uses your **currently configured OpenClaw model** to:
+1. Analyze email subjects and senders for semantic relevance
+2. Score each email from 1-10 based on likelihood of matching your intent
+3. Filter to top candidates (score ≥ 4 by default)
+4. Detect document mentions in context
 
-4. **Refine if needed:**
-   - Add more keywords/context
-   - Adjust date range
-   - Start over with new query
+The LLM integration **automatically uses whatever provider you've configured** in OpenClaw (llamacpp, Anthropic, OpenAI, etc.)
+
+### 🔗 Clickable Deep Links
+
+Each result includes a **[Click here to open email](link)** that:
+- Opens directly in Outlook Web App or desktop app
+- Works across platforms (Windows, Mac, mobile)
+- Renders as clickable in Telegram, Discord, Slack
+- Uses OWA deeplinks for maximum compatibility
 
 ## Architecture
 
@@ -82,57 +94,83 @@ outlook-search (this skill)
     ├── index.js          → Main entry point + interactive CLI
     ├── searcher.js       → Multi-phase search orchestration
     ├── query-expander.js → Natural language → search queries
-    └── date-parser.js    → "February" → date range with buffer
+    ├── date-parser.js    → "February" → date range with buffer
+    ├── llm.js            → LLM integration (relevance scoring)
+    └── bridge-client.js  → HTTP client for Outlook bridge
             ↓
-outlook-mapi (Outlook API client)
+outlook-mapi / outlook-bridge
             ↓
-Outlook Bridge (Python/MAPI)
-            ↓
-Windows Outlook Desktop App
+Windows Outlook Desktop App (via MAPI)
 ```
+
+### Module Breakdown
+
+| File | Purpose |
+|------|--------|
+| `query-expander.js` | Converts "statement of work" → expanded search terms |
+| `date-parser.js` | Parses natural language dates with intelligent buffering |
+| `llm.js` | LLM-powered relevance analysis (uses configured OpenClaw model) |
+| `bridge-client.js` | HTTP client for Outlook bridge (`localhost:8765`) |
+| `searcher.js` | Orchestrates all phases, formats results |
+| `index.js` | Interactive CLI entry point |
 
 ### Search Phases
 
-**Phase 1: Broad Scan**
+**Phase 1: Broad Scan** 📬
 - Expands query into multiple variants
-- Searches with relaxed criteria
-- Returns subjects, senders, dates only
+- Searches with relaxed criteria (subject only for speed)
+- Returns subjects, senders, dates, attachment flags
 
-**Phase 2: LLM Filtering**
-- Analyzes summaries for relevance
-- Scores each email (1-10)
-- Filters to top candidates
+**Phase 2: LLM Filtering** 🧠
+- Sends email summaries to configured LLM
+- Gets relevance scores (1-10) and reasoning
+- Filters to emails with score ≥ 4
 
-**Phase 3: Deep Read**
-- Fetches full email bodies
-- Extracts links and attachment names
-- Presents detailed results
+**Phase 3: Deep Read** 📖
+- Fetches full email bodies for top N candidates
+- Extracts links from body content
+- Presents detailed results with clickbale links
 
 ## Output Format
 
 Each result includes:
 - **Subject, Sender, Date**
-- **Relevance Score** (1-10)
-- **Attachment filenames** (if any)
-- **Extracted links** (SharePoint, OneDrive, etc.)
-- **Body preview** (first 200 characters)
+- **Relevance Score** (1-10) with reasoning
+- **Attachment info** (count if any)
+- **Clickable deep link** to open email directly
+- **Body preview** (first 200 characters, if available)
 
-Example:
+### Example Output
+
 ```
 1. [Score: 9]
-FROM: John Smith <john.smith@client.com>
-DATE: Feb 15, 2026, 2:34 PM
-SUBJECT: Re: Visa Project - Statement of Work (attached: SOW_Visa_Project_v2.pdf)
-  Preview: Here's the updated statement of work as discussed. Please review and let me know if you have any questions...
-  Links: https://sharepoint.example.com/sites/visa-project/Documents/SOW.docx
+   Subject: Re: Visa MAM Sync Up meeting (3 attachments)
+   From: Jesse Ramirez <jesramir@visa.com>
+   Date: Mar 30, 2026 at 2:56 PM
+   📧 [Open Email](https://outlook.office.com/mail/0/deeplink?...) ← Click this!
+   Why: Subject mentions both "Visa" and appears to be in a technical discussion thread
 ```
 
 ## Configuration
 
-No special configuration needed - inherits Outlook connection settings from outlook-mapi.
+No special configuration needed:
+- **Outlook bridge**: Auto-connects to `http://localhost:8765` (set via `BRIDGE_HOST`/`BRIDGE_PORT` env vars)
+- **LLM provider**: Reads from OpenClaw config at runtime (`agents.defaults.model.primary`)
 
-## Limitations
+## Limitations & Notes
 
-- Requires Windows with Outlook Desktop app
-- LLM analysis adds latency (typically 2-5 seconds per phase)
-- Deep reading limited to top 5 results by default (configurable)
+- **Requires Windows with Outlook Desktop** running for the bridge to work
+- **Bridge server** must be running: `python outlook-bridge.py`
+- **LLM analysis adds latency** (typically 2-5 seconds per email batch)
+- **Deep reading limited** to top 5 results by default (configurable via `deepReadLimit`)
+- **OWA deeplinks** work in browsers and often redirect to desktop app; native `outlook:` protocol is unreliable since Outlook 2013+
+
+## Why OWA Deep Links Instead of `outlook:` Protocol?
+
+The native Outlook desktop protocol handler (`outlook:`) has been **unreliable since Outlook 2013+** due to Microsoft removing many handlers for security reasons.
+
+**OWA deeplinks work better because they:**
+- ✅ Work in any browser directly
+- ✅ Often auto-redirect to desktop Outlook when installed on Windows
+- ✅ Compatible across platforms (Windows, Mac, mobile)
+- ✅ Render as clickable links in Telegram, Discord, Slack, etc.
