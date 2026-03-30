@@ -6,23 +6,97 @@
  */
 
 /**
- * Default model configuration - matches OpenClaw setup
+ * Load current model configuration from OpenClaw config files
+ * This respects whatever provider/model is currently configured system-wide
  */
-const DEFAULT_CONFIG = {
+async function loadCurrentModelConfig() {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Try to find openclaw.json in standard locations
+    const possiblePaths = [
+        path.join(process.env.HOME || process.env.USERPROFILE, '.openclaw', 'openclaw.json'),
+        path.join(__dirname, '..', '..', '.openclaw', 'openclaw.json'),
+        '/home/openclaw/.openclaw/openclaw.json'
+    ];
+    
+    let configData = null;
+    
+    for (const cfgPath of possiblePaths) {
+        try {
+            if (fs.existsSync(cfgPath)) {
+                configData = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+                break;
+            }
+        } catch (err) {
+            // Try next path
+        }
+    }
+    
+    if (!configData || !configData.agents?.defaults?.model?.primary) {
+        // Fallback to hardcoded defaults
+        return DEFAULT_FALLBACK_CONFIG;
+    }
+    
+    const primaryModel = configData.agents.defaults.model.primary;
+    
+    // Parse model identifier (format: provider/model-id)
+    const [provider, modelId] = primaryModel.split('/');
+    
+    // Build config based on provider type
+    if (provider === 'llamacpp') {
+        const llamacppConfig = configData.models.providers.llamacpp || {};
+        return {
+            baseUrl: llamacppConfig.baseUrl || 'http://localhost:8080/v1',
+            apiKey: llamacppConfig.apiKey || 'llamacpp-local',
+            model: modelId
+        };
+    } else if (provider === 'anthropic') {
+        return {
+            provider: 'anthropic',
+            apiKey: process.env.ANTHROPIC_API_KEY,
+            model: modelId || 'claude-sonnet-4-6'
+        };
+    } else if (provider === 'openai' || provider === 'openai-codex') {
+        return {
+            provider: 'openai',
+            baseUrl: configData.models.providers[provider]?.baseUrl || 'https://api.openai.com/v1',
+            apiKey: process.env.OPENAI_API_KEY,
+            model: modelId || 'gpt-4o'
+        };
+    }
+    
+    // Unknown provider, use fallback
+    return DEFAULT_FALLBACK_CONFIG;
+}
+
+/**
+ * Fallback configuration if we can't read OpenClaw config
+ */
+const DEFAULT_FALLBACK_CONFIG = {
     baseUrl: 'http://localhost:8080/v1',
     apiKey: 'llamacpp-local',
     model: 'Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.Q4_K_M.gguf'
 };
 
 /**
+ * Cache for current config (reloaded on each major operation)
+ */
+let cachedConfig = null;
+let configLastLoaded = 0;
+
+/**
  * Analyze a batch of email summaries and score them for relevance
  */
 async function analyzeEmailRelevance(emails, searchContext, options = {}) {
-    const { config = DEFAULT_CONFIG } = options;
+    // Load current model config from OpenClaw
+    const config = await loadCurrentModelConfig();
     
     if (emails.length === 0) {
         return { scored: [], filtered: [] };
     }
+    
+    console.log(`  Using model: ${config.model} (${config.provider || 'llamacpp'})`);
     
     // Build the email context string
     const emailText = emails.map((email, idx) => `
@@ -240,8 +314,8 @@ function fallbackAnalysis(emails, searchContext) {
  * Extract relevant snippets from email body based on search context
  */
 async function extractRelevantSnippets(emailBody, searchContext, options = {}) {
-    const { query } = searchContext;
-    const { config = DEFAULT_CONFIG } = options;
+    // Load current model config
+    const config = await loadCurrentModelConfig();
     
     if (!emailBody || emailBody.length === 0) {
         return [];
@@ -254,7 +328,7 @@ async function extractRelevantSnippets(emailBody, searchContext, options = {}) {
         : emailBody;
     
     const prompt = `
-The user is searching for: "${query}"
+The user is searching for: "${searchContext.query}"
 
 Extract the MOST relevant parts of this email body that relate to their search.
 
@@ -275,7 +349,7 @@ Return a JSON array with up to 3 snippets:
         return parseSnippetResponse(response);
     } catch (error) {
         console.error('Snippet extraction failed:', error.message);
-        return fallbackSnippetExtraction(truncatedBody, query);
+        return fallbackSnippetExtraction(truncatedBody, searchContext.query);
     }
 }
 
@@ -318,5 +392,6 @@ module.exports = {
     analyzeEmailRelevance,
     extractRelevantSnippets,
     callLlm,
-    DEFAULT_CONFIG
+    loadCurrentModelConfig,
+    DEFAULT_FALLBACK_CONFIG
 };
