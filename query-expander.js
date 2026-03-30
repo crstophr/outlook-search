@@ -26,7 +26,7 @@ function expandTerm(term) {
     const lowerTerm = term.toLowerCase().trim();
     
     // Check if this is a compound phrase
-    for (const [key, synonyms] of Object.entries(SYNONYNM_MAP)) {
+    for (const [key, synonyms] of Object.entries(SYNONYM_MAP)) {
         if (lowerTerm.includes(key) || key.includes(lowerTerm)) {
             return [...new Set([term, ...synonyms])];
         }
@@ -68,7 +68,7 @@ function buildSearchQuery(query, options = {}) {
 /**
  * Add document type filters to a query
  */
-function addDocumentFilters(query, types = ["pdf", "docx", "doc"] {
+function addDocumentFilters(query, types = ["pdf", "docx", "doc"]) {
     const extensions = types.map(ext => `":.${ext}"`).join(" OR ");
     return `${query} OR (${extensions})`;
 }
