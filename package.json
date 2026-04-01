@@ -1,16 +1,16 @@
 {
   "name": "outlook-search",
   "version": "1.0.0",
-  "description": "Search through Outlook inbox, calendar, and other data via the outlook-mapi skill",
+  "description": "Natural-language Outlook email search via the local outlook-mapi bridge with LLM relevance scoring",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "search": "node index.js"
+    "search": "node index.js",
+    "cli": "node index.js --cli"
   },
   "keywords": [
     "outlook",
     "email",
-    "calendar",
     "search",
     "office365",
     "mapi"
@@ -18,14 +18,14 @@
   "author": "Christopher",
   "license": "MIT",
   "dependencies": {
-    "outlook-mapi": "file:../../repos/OpenClaw-Outlook-MAPI"
+    "outlook-mapi": "file:../OpenClaw-Outlook-MAPI"
   },
   "openclaw": {
     "skill": true,
     "commands": [
       {
         "name": "outlook-search",
-        "description": "Search Outlook emails and calendar",
+        "description": "Search Outlook email",
         "file": "index.js"
       }
     ]

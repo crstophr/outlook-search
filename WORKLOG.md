@@ -2,215 +2,102 @@
 
 ## Overview
 
-**Project:** OpenClaw skill for intelligent, conversational email search through Microsoft Outlook  
+**Project:** Outlook email search skill with natural-language query expansion, LLM relevance scoring, and clickable Outlook Web deeplinks  
 **Started:** March 30, 2026  
-**Author:** Christopher (with Agent Smith/Clawd)  
 **Repository:** https://github.com/crstophr/outlook-search
 
----
+## Current repo location
 
-## Development Timeline
+Canonical local repo path now:
+- `/home/openclaw/repos/outlook-search`
+
+For compatibility with the OpenClaw skill path, the old workspace location may be a symlink:
+- `/home/openclaw/.openclaw/workspace/skills/outlook-search`
+
+## What exists in code today
+
+### Core modules
+- `index.js` — interactive CLI session flow and exports
+- `searcher.js` — main orchestration
+- `query-expander.js` — query expansion
+- `date-parser.js` — natural-language date parsing
+- `llm.js` — model config loading, LLM scoring, snippet extraction, keyword fallback
+- `bridge-client.js` — HTTP client and Outlook Web deeplink generator
+
+### Bridge routes used
+- `GET /health`
+- `POST /api/email/search`
+- `GET /api/email/<id>`
+
+### Real scope today
+Despite some older wording, this repo is currently focused on **email search**. It does not contain a real calendar-search implementation.
+
+## Development timeline summary
 
 ### March 30, 2026
+- Project initiated to search Outlook mail for project documentation and related context
+- Designed a multi-phase flow: broad scan → LLM filtering → deep read
+- Implemented:
+  - `query-expander.js`
+  - `date-parser.js`
+  - `searcher.js`
+  - `llm.js`
+  - `bridge-client.js`
+  - `index.js`
+- Added Outlook Web deeplink generation for clickable results
+- Wired the repo to the local Outlook bridge on port 8765
 
-#### 14:12 - Project Initiated
-- **Goal:** Create a skill that uses outlook-mapi to search Outlook inbox for information
-- **Use case:** Finding project documentation (Visa statement of work) using natural language queries
-- **Key requirements:**
-  - Search through email bodies, not just subjects
-  - Use LLM for intelligent relevance scoring
-  - Extract attachment filenames and links
-  - Provide clickable deep links to open emails directly
+## Code realities worth remembering
 
-#### 14:12 - Initial Architecture Proposed
-Discussed multi-phase search approach:
-- **Phase 1:** Broad scan with query expansion (subject/snippet level)
-- **Phase 2:** LLM-powered filtering for relevance scoring
-- **Phase 3:** Deep read of top candidates, extract links/attachments
+### 1. Local dependency path changed after repo move
+After moving this repo into `/home/openclaw/repos`, the local dependency on `OpenClaw-Outlook-MAPI` must resolve relative to that new location.
 
-Agreed on:
-- Single cohesive skill architecture
-- Heavy use of LLM for understanding and filtering
-- Reading email bodies thoroughly
-- Buffer around dates (e.g., "February" → Jan 15-Mar 15)
+Expected local dependency path in `package.json`:
+- `file:../OpenClaw-Outlook-MAPI`
 
-#### 14:36 - Initial Files Created
-Created basic skeleton:
-- `SKILL.md` — OpenClaw skill definition
-- `index.js` — Basic CLI entry point
-- `package.json` — Dependencies (links to outlook-mapi)
-- `README.md` — User documentation
+### 2. Field-shape compatibility was added in `llm.js`
+`llm.js` now normalizes both older camelCase properties and the bridge’s current snake_case response fields, including:
+- `sender` / `senderName`
+- `sender_email` / `senderEmail`
+- `received_datetime` / `receivedDateTime`
+- `has_attachments` / `hasAttachments`
 
-#### 14:45 - Module Design Discussion
-Proposed architecture:
-```javascript
-├── query-expander.js   → Natural language → Outlook search queries
-├── date-parser.js      → "February" → date range with buffer
-├── searcher.js         → Orchestrates multi-phase search
-├── email-analyzer.js   → LLM-powered content analysis
-└── index.js            → Main entry point + chat interface
-```
+That keeps prompt construction and fallback scoring aligned with the current Outlook bridge output.
 
-#### 14:50 - Core Modules Implemented
-Created three foundational modules:
+### 3. Date filtering is partly client-side
+`bridge-client.js` sends `start_date` / `end_date`, but current effective behavior depends mostly on:
+- `days` sent to the bridge
+- client-side end-date filtering in `searcher.js`
 
-**1. `query-expander.js`**
-- Maps common phrases to search terms ("statement of work" → "SOW", etc.)
-- Builds Outlook-compatible queries with OR clauses
-- Supports document type filtering
+### 4. Snippet extraction is implemented but not integrated
+`extractRelevantSnippets()` exists in `llm.js`, but `searcher.js` does not currently use it in the main result-building path.
 
-**2. `date-parser.js`**
-- Parses natural language dates ("February", "last week", "a month ago")
-- Adds intelligent 2-week buffer on either side
-- Returns ISO date strings for Outlook query compatibility
+### 5. Test scripts are ad hoc
+There are multiple one-off scripts like:
+- `test-visa.js`
+- `test-clickable-links.js`
+- `test-simple.js`
+- `search-visa-work.js`
+- `direct-visa-search.js`
 
-**3. Updated `searcher.js`**
-- Multi-phase orchestration (broad → filter → deep)
-- Integration points for LLM analysis
-- Email formatting and link extraction
+These are useful probes, not a formal automated test suite.
 
-#### 14:59 - LLM Integration Added
-Created **`llm.js`** — critical module:
-- `analyzeEmailRelevance()` — Scores emails 1-10 based on search context
-- `extractRelevantSnippets()` — Pulls key excerpts from email bodies
-- `callLlm()` — HTTP client for llamacpp API
-- **Fallback** to keyword-based analysis if LLM unavailable
+## Suggested reading order for future work
 
-Prompt engineering:
-```text
-The user is searching for: "${query}"
-Additional context: ${context}
+1. `searcher.js`
+2. `bridge-client.js`
+3. `llm.js`
+4. `README.md`
+5. `SKILL.md`
 
-Score each email from 1-10 based on relevance.
-Return JSON array with score, reasoning, hasDocuments fields.
-```
+## Good next cleanup targets
 
-#### 15:08 - Dynamic Config Loading
-Updated `llm.js` to **read OpenClaw config at runtime**:
-- Reads `/home/openclaw/.openclaw/openclaw.json`
-- Extracts `agents.defaults.model.primary`
-- Supports llamacpp, Anthropic, OpenAI, openai-codex providers
-- Logs which model is being used
-
-This ensures the skill **always uses whatever provider Christopher has currently configured**.
-
-#### 15:26 - Bridge Integration Discovery
-Realized we need to use the existing `outlook-mapi` bridge client from the local repo, not create a new interface.
-
-Investigated `/home/openclaw/repos/OpenClaw-Outlook-MAPI/` and found:
-- Python Flask bridge at `scripts/outlook-bridge.py`
-- Runs on port **8765**
-- Endpoints: `/api/email/search`, `/api/email/recent`, `/api/email/:id`
-
-#### 15:30 - Bridge Client Created
-Created **`bridge-client.js`** — HTTP client for Outlook bridge:
-- `searchEmails(query, options)` — Search with query, date filters
-- `getRecentEmails(options)` — Get recent emails from folder
-- `getEmailById(entryId)` — Fetch full email content
-- `healthCheck()` — Verify bridge is running
-
-#### 15:48 - First Search Test
-Ran search for "Visa statement of work" and discovered:
-
-**Found:** 48 emails about **Visa MAM project**
-- Project: Media Asset Management (MAM) system using Iconik Storage Gateway
-- Hardware: 2 Dell Windows workstations with ~2TB SSD each
-- Start date: December 17, 2025
-- Key people: Beny Korotkin (technical lead), Ernesto Carriel & Unmesh Suryawanshi (Visa contacts)
-
-The actual SOW is referenced as "ISG requirements" in the email thread.
-
-#### 16:06 - Clickable Links Implemented
-Added **Telegram-clickable deep links** to search results:
-- Format: `📧 [Open Email](https://outlook.office.com/mail/0/deeplink?subject=...&itemid=...)`
-- Uses OWA deeplinks for maximum compatibility
-- Works in browser AND often redirects to desktop Outlook on Windows
-- Renders clickable in Telegram, Discord, Slack, etc.
-
-**Why not `outlook:` protocol?**
-The native protocol handler is unreliable since Outlook 2013+ (Microsoft removed handlers for security).
-
-Created `createEmailLink()` function in bridge-client.js:
-```javascript
-function createEmailLink(entryId, subject = '') {
-    const encodedSubject = encodeURIComponent(subject || '(Email)');
-    return `https://outlook.office.com/mail/0/deeplink?subject=${encodedSubject}&itemid=${encodeURIComponent(entryId)}`;
-}
-```
-
-#### 16:11 - Documentation Updated
-Updated all documentation files to reflect current state:
-- **SKILL.md** — Full technical architecture, module breakdown, API docs
-- **README.md** — User-facing guide with examples and troubleshooting
-- Added extensive inline comments throughout codebase
+1. Align field names with the Outlook bridge response schema.
+2. Decide whether calendar search belongs here or should be removed from leftover metadata/docs entirely.
+3. Replace ad hoc test scripts with a real test harness.
+4. Decide whether snippet extraction should be integrated into displayed results.
+5. Tighten docs anytime the bridge contract changes.
 
 ---
 
-## Technical Architecture (Final)
-
-```
-outlook-search
-├── query-expander.js   → "statement of work" → expanded search terms
-├── date-parser.js      → "February" → {start, end} with buffer
-├── llm.js              → LLM-powered relevance analysis
-│   ├── analyzeEmailRelevance()  — Scores emails 1-10
-│   ├── extractRelevantSnippets() — Pulls key excerpts
-│   └── callLlm()        — HTTP client for configured model
-├── bridge-client.js    → HTTP client for Outlook bridge
-│   ├── searchEmails()
-│   ├── getRecentEmails()
-│   ├── getEmailById()
-│   └── createEmailLink() — Generates OWA deeplinks
-├── searcher.js         → Orchestrates all phases
-│   ├── broadSearch()    — Phase 1: fast subject-level search
-│   ├── analyzeEmailSummaries() — Phase 2: LLM filtering
-│   ├── deepRead()       — Phase 3: full body fetch
-│   └── formatEmailResult() — Formats for output
-└── index.js            → Main CLI entry point
-```
-
-## Key Features Delivered
-
-| Feature | Status |
-|---------|--------|
-| Natural language query expansion | ✅ |
-| Date parsing with buffering | ✅ |
-| LLM-powered relevance scoring | ✅ |
-| Multi-phase search (broad → filter → deep) | ✅ |
-| Attachment detection | ✅ |
-| Link extraction from email bodies | ✅ |
-| **Clickable Outlook deep links** | ✅ |
-| Dynamic model config loading | ✅ |
-| Bridge integration (localhost:8765) | ✅ |
-
-## What Works Now
-
-```bash
-# Test search with clickable links
-node test-clickable-links.js
-```
-
-Output includes:
-- Relevance scores (1-10)
-- Subject, sender, date
-- **[Click here to open email](link)** — works in Telegram!
-
-## Outstanding / Future Work
-
-1. **Attachment downloading/preview** — Currently only detects presence
-2. **Calendar event search** — Same architecture could apply
-3. **Thread-aware search** — Follow conversations intelligently
-4. **Conversation refinement loop** — Interactive follow-up questions
-5. **More robust test suite** — Unit tests for query expansion, date parsing
-
-## Lessons Learned
-
-1. **OWA deeplinks are more reliable** than `outlook:` protocol for cross-platform compatibility
-2. **Simple queries work better** through the bridge — complex boolean logic can fail
-3. **LLM adds latency** but significantly improves relevance scoring over keywords alone
-4. **Date buffering is essential** — users rarely remember exact dates
-5. **Read config at runtime** — user's model preference changes, skill should adapt
-
----
-
-*Last updated: March 30, 2026 16:11 PDT*
+*Updated after moving repo into `/home/openclaw/repos` and re-auditing docs against code.*

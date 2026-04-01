@@ -79,6 +79,23 @@ const DEFAULT_FALLBACK_CONFIG = {
     model: 'Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.Q4_K_M.gguf'
 };
 
+function getSenderName(email) {
+    return email.sender || email.senderName || '';
+}
+
+function getSenderEmail(email) {
+    return email.sender_email || email.senderEmail || '';
+}
+
+function getReceivedDateTime(email) {
+    return email.received_datetime || email.receivedDateTime || null;
+}
+
+function hasAttachments(email) {
+    if (typeof email.has_attachments === 'boolean') return email.has_attachments;
+    if (typeof email.hasAttachments === 'boolean') return email.hasAttachments;
+    return Boolean(email.attachments_count || email.attachmentsCount);
+}
 
 /**
  * Analyze a batch of email summaries and score them for relevance
@@ -94,12 +111,19 @@ async function analyzeEmailRelevance(emails, searchContext, options = {}) {
     console.log(`  Using model: ${config.model} (${config.provider || 'llamacpp'})`);
     
     // Build the email context string
-    const emailText = emails.map((email, idx) => `
+    const emailText = emails.map((email, idx) => {
+        const senderName = getSenderName(email);
+        const senderEmail = getSenderEmail(email);
+        const receivedDateTime = getReceivedDateTime(email);
+        const attachmentFlag = hasAttachments(email);
+
+        return `
 Email #${idx + 1}:
 - Subject: ${email.subject || '(no subject)'}
-- From: ${email.senderName || ''} <${email.senderEmail || ''}>\n- Date: ${email.receivedDateTime ? new Date(email.receivedDateTime).toLocaleString() : 'unknown'}
-- Has attachments: ${email.hasAttachments}
-`).join('\n');
+- From: ${senderName} <${senderEmail}>\n- Date: ${receivedDateTime ? new Date(receivedDateTime).toLocaleString() : 'unknown'}
+- Has attachments: ${attachmentFlag}
+`;
+    }).join('\n');
     
     // Build the analysis prompt
     const prompt = buildAnalysisPrompt(searchContext, emailText);
@@ -275,7 +299,8 @@ function fallbackAnalysis(emails, searchContext) {
     const scored = emails.map(email => {
         let score = 5; // Neutral baseline
         const subject = (email.subject || '').toLowerCase();
-        const sender = (email.senderEmail || '').toLowerCase();
+        const sender = getSenderEmail(email).toLowerCase();
+        const attachmentFlag = hasAttachments(email);
         
         // Check for direct query matches in subject
         const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
@@ -293,16 +318,16 @@ function fallbackAnalysis(emails, searchContext) {
             score += 2;
         }
         
-        // Boost for hasAttachments flag
-        if (email.hasAttachments) {
+        // Boost for attachment flag
+        if (attachmentFlag) {
             score += 1;
         }
         
         return {
             ...email,
             relevanceScore: Math.min(10, score),
-            reasoning: `Matched ${matchedWords.length} query words${email.hasAttachments ? ', has attachments' : ''}`,
-            hasDocuments: email.hasAttachments ? 'yes' : 'maybe',
+            reasoning: `Matched ${matchedWords.length} query words${attachmentFlag ? ', has attachments' : ''}`,
+            hasDocuments: attachmentFlag ? 'yes' : 'maybe',
             searchMatches: matchedWords.length > 0 ? ['keywords'] : []
         };
     });
